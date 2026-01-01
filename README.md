@@ -3,7 +3,7 @@
 An Open Standard for Mempool-Resilient Post-Quantum Transaction Execution
 
 Status: Implementation Ready (Protocol Review Requested)
-Specification Version: 1.0.0
+Specification Version: 1.1.0
 Author: rosiea
 Contact: [PQRosie@proton.me](mailto:PQRosie@proton.me)
 Date: January 2026
@@ -21,11 +21,15 @@ The key words **“MUST”**, **“MUST NOT”**, **“REQUIRED”**, **“SHALL
 
 ## Abstract
 
-Zero-Exposure Broadcast (ZEB) defines an execution mode that mitigates public-mempool quantum reaction attacks by ensuring that a transaction’s witness and execution material are not disclosed to the public mempool prior to confirmation. The first public disclosure of execution material occurs only in a mined block, collapsing the attacker’s public-mempool reaction window to approximately zero.
+Zero-Exposure Broadcast (ZEB) defines an execution mode that mitigates public-mempool reaction attacks, including short-range quantum race attacks, by removing the ability to pre-construct valid competing spends prior to execution.
 
-ZEB targets adversaries whose ability to act depends on pre-confirmation disclosure of attack-critical material, including public keys, script data, or other witness elements revealed at spend time. ZEB requires no consensus changes, introduces no new opcodes, and does not rely on miner trust. It specifies controlled non-public submission, public-mempool exposure detection, bounded confirmation windows, and deterministic fail-closed fallback.
+ZEB is designed to be used with an execution-gated spend construction. In an execution-gated spend, a valid competing spend cannot be constructed without execution-time material that is intentionally withheld until execution. This removes pre-construction as an attack vector.
 
-ZEB does not claim protection against attackers who have already compromised keys prior to the spend attempt, attackers who can act independently of mempool observation, or attackers with miner-equivalent connectivity.
+ZEB optionally applies relay discipline (including non-public submission) to compress the remaining exposure window, but does not rely on transaction secrecy for its core security property. Transactions MAY be broadcast publicly; visibility does not enable replacement when the spend construction is execution-gated.
+
+ZEB requires no consensus changes, introduces no new opcodes, and does not rely on miner trust or coordination. It specifies execution preconditions, optional relay discipline, exposure monitoring, bounded confirmation windows, and deterministic fail-closed fallback.
+
+ZEB does not claim protection against attackers who have already compromised the relevant keys prior to the spend attempt, attackers with access to execution-time material, or adversaries with miner-equivalent connectivity, collusion, or censorship capability.
 
 ---
 
@@ -35,7 +39,7 @@ Bitcoin’s public mempool is observable. Any transaction relayed publicly expos
 
 Replacement behaviour is governed by mempool policy rather than consensus. Miners MAY include any consensus-valid conflicting transaction they receive. Under a public-mempool adversary model, the critical enabling factor for replacement is pre-confirmation public disclosure.
 
-ZEB removes this enabling factor by preventing public-mempool disclosure prior to confirmation.
+ZEB removes this enabling factor by requiring an execution-gated spend construction in which competing spends remain invalid until execution-time material is revealed, regardless of transaction visibility.
 
 ---
 
@@ -64,8 +68,8 @@ ZEB does not claim protection against an adversary who:
 
 ### 2.3 Security Objective
 
-* Prevent public pre-confirmation disclosure of witness or execution material.
-* Collapse the public-mempool reaction window to approximately zero.
+* Deny pre-construction of valid competing spends by requiring an execution-gated spend construction.
+* Reduce the attacker’s effective reaction window during the broadcast-to-confirmation period, optionally using relay discipline.
 
 ---
 
@@ -75,25 +79,35 @@ ZEB’s effectiveness depends on whether attack-critical material is disclosed o
 
 ### 3.1 Output Types Where ZEB Is Effective
 
-ZEB is effective for constructions where attack-critical material is revealed only in the witness, including:
+ZEB is effective when used with an execution-gated spend construction and where attack-critical material would otherwise be usable for pre-construction or reactive replacement.
 
-* Hash-to-public-key outputs such as P2WPKH.
-* Script-hash constructions such as P2WSH when the script does not embed public keys or other attack-critical material prior to spending.
-* Any construction where the attacker’s trigger depends on execution-time revelation.
+ZEB is most effective when:
+* The spend path is execution-gated (competing spends invalid without execution-time material), and
+* Long-term attack-critical material is not already exposed on-chain at output creation.
 
-In these cases, ZEB prevents the attacker from learning the necessary material prior to confirmation.
-
-For maximum effectiveness, ZEB SHOULD be applied to first-spend outputs whose public keys have not previously appeared on-chain.
+For maximum effectiveness, ZEB SHOULD be applied to first-spend outputs whose public keys have not previously appeared on-chain and whose selected spend path does not embed public keys or other attack-critical material in the locking script.
 
 ### 3.2 Output Types Where ZEB Is Not Sufficient
 
-ZEB is not sufficient for constructions where attack-critical material is already visible on-chain, including:
+ZEB is not sufficient when:
+* The spend construction is not execution-gated (i.e., a valid competing spend can be pre-constructed without execution-time material), or
+* Attack-critical material is already visible on-chain (e.g., key material exposed at output creation), enabling preparation independent of mempool observation.
 
-* Taproot key-path outputs where the public key is revealed at output creation.
-* Script paths that embed public keys or other sensitive material in the locking script.
-* Any construction where an attacker can prepare a competing spend without observing the mempool.
+For these cases, ZEB does not address key-compromise risk and MUST NOT be presented as replacement-proof for that spend construction.
 
-For these cases, ZEB does not address key-compromise risk.
+---
+
+## 3A. Core Requirement: Execution-Gated Spend Construction
+
+ZEB is defined over an execution-gated spend construction.
+
+An execution-gated spend construction MUST ensure that a valid spend cannot be constructed without execution-time material that is intentionally withheld until the execution attempt.
+
+This specification defines ZEB’s broadcast and monitoring rules, but does not mandate a single script template. Any spend construction is acceptable provided it satisfies the execution-gated property.
+
+Examples of execution-gated spend constructions include script paths that commit to a spend-time secret (or other attempt-scoped material) and verify it during execution.
+
+If a spend construction does not deny pre-construction (i.e., a valid competing spend can be constructed from public information prior to execution), then ZEB cannot claim replacement resistance for that spend and SHOULD be treated as relay-only mitigation.
 
 ---
 
@@ -113,9 +127,13 @@ ZEB does not:
 
 Public mempool — Unconfirmed transaction pools of publicly reachable nodes.
 Non-public submission — Delivery of a transaction to endpoints that do not relay it to the public mempool.
-Exposure window — Interval between first public disclosure of execution material and confirmation.
-Leak — Appearance of the transaction in any public mempool prior to confirmation.
+Exposure window — Interval between transaction appearance in the chosen deployment’s observation surface (public mempool or selected monitoring set) and confirmation.
+Leak — Unintended public-mempool appearance of a transaction prior to confirmation during an execution attempt that selected non-public submission. If public broadcast was intentionally selected, public appearance is expected and is not a leak.
 Confirmation — Inclusion of the transaction in a valid block extending the best chain.
+
+Execution-gated spend — A spend construction in which a valid spend cannot be constructed without execution-time material that is intentionally withheld until the execution attempt.
+
+Execution-time material — Attempt-scoped material required to satisfy the selected execution-gated spend (e.g., a spend-time secret preimage and its commitment) that is not disclosed prior to execution.
 
 ---
 
@@ -136,36 +154,41 @@ Implementations **SHOULD**:
 
 ### 6.2 Networking
 
-Implementations **MUST**:
+ZEB security derives from the execution-gated spend construction. Broadcast method is an operational choice.
 
-* Support non-public submission to a configurable relay set.
-* Treat any route that causes public relay as a leak.
-* Support public mempool observation for exposure detection.
+Implementations MUST:
+* Support public peer-to-peer broadcast of ZEB transactions.
+* Support optional non-public submission to a configurable relay set.
+* Support public mempool observation for exposure detection and confirmation tracking.
 
-Implementations **SHOULD**:
-
-* Use multiple non-public endpoints to reduce single-channel failure.
+Implementations SHOULD:
+* Allow broadcast method selection per attempt (public, non-public, or hybrid).
+* Use multiple non-public endpoints when non-public submission is selected.
 * Treat non-public submission guarantees as operational assurances, not cryptographic guarantees.
+
+Implementations MUST NOT:
+* Assume that public broadcast weakens ZEB security when the spend construction is execution-gated.
+* Require miner coordination or trusted miner behavior.
 
 ---
 
 ## 7. Protocol Overview
 
-ZEB uses two channels:
+ZEB is defined over an execution-gated spend construction. Competing spends remain invalid until execution-time material is revealed.
 
-1. Non-public submission channel for initial transaction delivery.
+Broadcast method is an operational choice. Transactions MAY be broadcast publicly or MAY be delivered via non-public submission channels. Non-public submission MAY be used to compress the exposure window but is not required for correctness.
+
+ZEB uses two operational channels:
+1. Submission channel (public, non-public, or hybrid) for transaction delivery.
 2. Public observation channel for exposure detection and confirmation tracking.
 
 ZEB succeeds if:
-
-* Non-public submission completes.
-* No public-mempool leak occurs prior to confirmation.
-* Confirmation occurs within a bounded window.
+* The transaction confirms within the configured window, and
+* No policy-violating exposure condition occurs for the selected deployment mode.
 
 ZEB fails closed if:
-
-* A leak occurs before confirmation, or
-* Confirmation does not occur by the configured deadline.
+* Confirmation does not occur by the configured deadline, or
+* A deployment-defined exposure condition is met (for example, unintended public appearance during a non-public submission attempt).
 
 ---
 
@@ -174,19 +197,19 @@ ZEB fails closed if:
 ### 8.1 States
 
 READY
-SUBMITTED_NON_PUBLIC
+SUBMITTED
 CONFIRMED
-LEAK_DETECTED
+EXPOSURE_DETECTED
 TIMEOUT
 FAIL_CLOSED
 
 ### 8.2 Transitions
 
-READY → SUBMITTED_NON_PUBLIC
-SUBMITTED_NON_PUBLIC → CONFIRMED
-SUBMITTED_NON_PUBLIC → LEAK_DETECTED
-SUBMITTED_NON_PUBLIC → TIMEOUT
-LEAK_DETECTED → FAIL_CLOSED
+READY → SUBMITTED
+SUBMITTED → CONFIRMED
+SUBMITTED → EXPOSURE_DETECTED
+SUBMITTED → TIMEOUT
+EXPOSURE_DETECTED → FAIL_CLOSED
 TIMEOUT → FAIL_CLOSED
 
 ### 8.3 Fail-Closed Semantics
@@ -202,20 +225,27 @@ On FAIL_CLOSED, implementations **MUST**:
 
 ## 9. Exposure Detection
 
-### 9.1 Leak Definition
+Exposure detection is an operational mechanism used to enforce fail-closed semantics for selected deployment modes. It does not define ZEB’s core security property, which derives from execution-gated validity.
 
-A leak occurs if the transaction identifier appears as unconfirmed on any public observation node before confirmation.
+### 9.1 Exposure Definition
+
+An exposure condition is deployment-defined.
+
+For execution attempts that selected non-public submission, the terms “leak” and “exposure condition” are used interchangeably to describe unintended public-mempool appearance prior to confirmation.
+
+If non-public submission was selected for an attempt, an exposure condition MAY be: appearance of the transaction as unconfirmed in any public observation mempool prior to confirmation.
+
+If public broadcast was intentionally selected, public appearance is expected and MUST NOT be treated as an exposure condition.
 
 ### 9.2 Observation Strategy
 
-Implementations **MUST**:
-
+Implementations MUST:
 * Maintain at least two independent public observation nodes.
-* Query for presence at regular intervals during SUBMITTED_NON_PUBLIC.
+* Query for presence at regular intervals during the unconfirmed period.
 
-### 9.3 Leak Rule
+### 9.3 Exposure Rule
 
-If the transaction appears in any public mempool prior to confirmation, the implementation **MUST** mark LEAK_DETECTED and transition to FAIL_CLOSED.
+If an exposure condition is met for the selected deployment mode, the implementation MUST mark the attempt as failed and transition to FAIL_CLOSED.
 
 ---
 
@@ -257,43 +287,43 @@ Fallback strategies **MAY** include constructing a fresh attempt with new identi
 
 ### 13.1 Example Input UTXO
 
-prev_txid = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-prev_vout = 0
-value = 10000000 sats
-scriptPubKey_type = P2WPKH
-scriptPubKey = 0014b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3
+prev_txid = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  
+prev_vout = 0  
+value = 10000000 sats  
+scriptPubKey_type = P2WPKH  
+scriptPubKey = 0014b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3  
 
 ### 13.2 Spend Attempt Transaction (Tx1)
 
-version = 2
-locktime = 0
+version = 2  
+locktime = 0  
 
 inputs[0]:
 
-* txid = prev_txid
-* vout = 0
-* sequence = 0xfffffffd
+* txid = prev_txid  
+* vout = 0  
+* sequence = 0xfffffffd  
 
 outputs[0]:
 
-* value = 9900000 sats
-* scriptPubKey = 0014d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4
+* value = 9900000 sats  
+* scriptPubKey = 0014d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4  
 
 outputs[1]:
 
-* value = 90000 sats
-* scriptPubKey = 0014c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4
+* value = 90000 sats  
+* scriptPubKey = 0014c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4  
 
-fee = 10000 sats
+fee = 10000 sats  
 
 Witness:
 
 * Signature and public key appear only at execution.
-* Under ZEB, this witness is not disclosed to the public mempool.
+* This transaction structure is illustrative only. P2WPKH is not an execution-gated spend construction. For ZEB deployment, an execution-gated construction (as defined in Section 3A) MUST be used; this example shows transaction anatomy, not a secure execution-gated spend.
 
 ### 13.3 Adversarial Conflicting Spend (Tx1′)
 
-A public-mempool adversary relies on observing Tx1’s execution material to derive keys or construct a competing spend. Under ZEB, Tx1 is not publicly visible pre-confirmation, so the adversary has no public trigger.
+A public-mempool adversary attempts to construct a conflicting spend (Tx1′) by observing Tx1 and reacting before confirmation. If Tx1 uses a non-execution-gated construction (such as P2WPKH), a competing spend may be possible once execution material is disclosed. When Tx1 uses an execution-gated spend construction as defined in Section 3A, the adversary cannot construct a valid competing spend without execution-time material, regardless of transaction visibility.
 
 ---
 
@@ -301,7 +331,7 @@ A public-mempool adversary relies on observing Tx1’s execution material to der
 
 ### 14.1 Effectiveness Statement
 
-Against public-mempool quantum reaction attackers whose ability to act depends on pre-confirmation disclosure of attack-critical material, ZEB collapses the reaction window to approximately zero by ensuring that the first public disclosure occurs only after confirmation.
+Against public-mempool reaction attackers whose ability to act depends on constructing a valid competing spend during the broadcast-to-confirmation window, ZEB prevents pre-construction by requiring an execution-gated spend construction. Optional relay discipline may further compress the remaining exposure window, but correctness does not depend on transaction secrecy.
 
 ### 14.2 Limitations
 
@@ -318,7 +348,11 @@ Some implementations MAY choose to apply additional execution-time hardening tec
 
 ## 15. Summary
 
-Zero-Exposure Broadcast is an operational execution mode that prevents public-mempool disclosure of witness and execution material prior to confirmation. For output types where attack-critical material is revealed only at spend time, ZEB provides a practical near-term mitigation against public-mempool quantum reaction attacks without requiring consensus changes or the reintroduction of dangerous opcodes.
+Zero-Exposure Broadcast (ZEB) is an execution mode defined over an execution-gated spend construction. Its core security property is denial of pre-construction: competing spends remain invalid until execution-time material is revealed.
+
+ZEB may be used with public broadcast or with optional non-public submission. Non-public submission can compress the exposure window but is not required for correctness when the spend construction is execution-gated.
+
+ZEB requires no consensus changes, introduces no new opcodes, and does not rely on miner trust or coordination.
 
 ---
 
@@ -331,14 +365,14 @@ Layer                   | Attack Surface Addressed        | Mitigation Mechanism
 ----------------------- | ------------------------------- | -----------------------------------------------
 BIP-360 P2TSH           | At-rest key exposure            | Removes key-path spending; public key hidden until spend
 PQHD                   | Custody and authorisation       | Post-quantum authorisation; classical key compromise alone is insufficient
-Zero-Exposure Broadcast | Public-mempool reaction window  | Non-public broadcast; pre-confirmation disclosure avoided
+Zero-Exposure Broadcast | Replacement & reaction window | Execution-gated validity; optional relay discipline
 ```
 
 Each layer operates at a different phase of the transaction lifecycle:
 
 * BIP-360 reduces long-term on-chain exposure prior to spend.
 * PQHD enforces one-shot, post-quantum authorisation at execution time.
-* ZEB collapses the public-mempool reaction window during broadcast.
+* ZEB denies pre-construction by requiring execution-gated validity; optional relay discipline may further compress the residual exposure window during broadcast-to-confirmation.
 
 These mechanisms are complementary. None individually guarantees protection against all quantum-capable adversaries, but together they materially reduce exposure across storage, authorisation, and broadcast phases under the stated threat models.
 
@@ -346,14 +380,14 @@ These mechanisms are complementary. None individually guarantees protection agai
 
 ## 17. Threat Boundary Summary (Informative)
 
-| Adversary Capability                                  | Mitigated |
-| ----------------------------------------------------- | --------- |
-| Public-mempool reaction after witness disclosure      | Yes       |
-| Key derivation triggered by execution-time disclosure | Yes       |
-| Pre-compromised keys prior to spend                   | No        |
-| Miner-connected or miner-colluding adversary          | No        |
-| Outputs with pre-existing on-chain public keys        | No        |
-| Censorship of non-public submission channels          | No        |
+| Adversary Capability                                                                          | Mitigated |
+| --------------------------------------------------------------------------------------------- | --------- |
+| Public-mempool reaction after witness disclosure                                               | Yes       |
+| Key derivation triggered by execution-time disclosure (execution-gated construction required) | Yes       |
+| Pre-compromised keys prior to spend                                                           | No        |
+| Miner-connected or miner-colluding adversary                                                   | No        |
+| Outputs with pre-existing on-chain public keys                                                 | No        |
+| Censorship of non-public submission channels                                                   | No        |
 
 ---
 
@@ -367,13 +401,13 @@ Non-public submission refers to any delivery mechanism that avoids public mempoo
 * Miner-connected peers or pool submission endpoints.
 * Transaction relay services that forward to miners without public broadcast.
 
-ZEB does not require identifying or trusting miners. Any route that avoids public mempool disclosure satisfies the requirement.
+Non-public submission is an optional optimization under ZEB. It MAY be used to compress the exposure window and reduce metadata leakage, but it is not required for correctness when the spend construction is execution-gated. Public peer-to-peer broadcast remains a valid submission method.
 
 ### 18.2 Public Mempool Monitoring
 
 Implementations **SHOULD** monitor multiple independent public nodes for transaction appearance. Monitoring sources **SHOULD** be diverse in network topology and implementation.
 
-Observation frequency during SUBMITTED_NON_PUBLIC **SHOULD** be sufficient to detect leaks promptly.
+Observation frequency during SUBMITTED **SHOULD** be sufficient to detect exposure conditions promptly.
 
 ### 18.3 Fee Strategy Considerations
 
@@ -431,9 +465,10 @@ ZEB assumes the BIP-360 public-mempool adversary:
 
 * Observes public mempools.
 * Reacts to witness or execution-time disclosure.
-* Cannot reliably observe non-public submission channels.
+* Attempts replacement during the broadcast-to-confirmation window.
 
-ZEB is orthogonal to BIP-360 custody, quorum, and recovery semantics. It constrains broadcast visibility only and does not alter authority.
+ZEB’s core security property in this integration is execution-gated validity: competing spends remain invalid without execution-time material. Non-public submission MAY be used as an optional optimization to compress the exposure window, but ZEB does not require it for correctness when the spend construction is execution-gated.
+
 
 ---
 
@@ -441,48 +476,45 @@ ZEB is orthogonal to BIP-360 custody, quorum, and recovery semantics. It constra
 
 ### A.4.1 Execution Path Binding
 
-When a BIP-360 P2TSH execution path is selected for spend, the sender **MAY** designate the spend as ZEB-constrained.
+When a BIP-360 P2TSH execution path is selected for spend, the sender MAY designate the spend as ZEB-constrained.
 
 A ZEB-constrained spend:
 
-* **MUST** be submitted via non-public submission channels.
-* **MUST NOT** be publicly rebroadcast prior to confirmation.
-* **MUST** be monitored for public-mempool exposure.
+* MUST use an execution-gated spend construction as defined in Section 3A (i.e., competing spends remain invalid without execution-time material).
+* MAY be submitted via public broadcast or via non-public submission channels.
+* MUST be monitored for deployment-defined exposure conditions during the unconfirmed period.
 
 This designation does not alter the script, witness, or transaction structure.
 
----
+### A.4.2 Submission
 
-### A.4.2 Non-Public Submission
+For a ZEB-constrained BIP-360 P2TSH spend, the transaction MAY be delivered using one or more submission routes, including:
 
-For a ZEB-constrained BIP-360 P2TSH spend, the transaction **SHOULD** be delivered using one or more non-public routes, including:
-
+* Public peer-to-peer broadcast.
 * Limited-relay peers.
-* Miner-connected peers.
+* Miner-connected peers or pool submission endpoints.
 * Transaction accelerator endpoints.
 
-ZEB does not require identifying miners or trusting miner behaviour. Any route that avoids public mempool relay is acceptable.
-
----
+Non-public submission MAY be used as an optional optimization to compress the exposure window, but is not required for correctness when the spend construction is execution-gated.
 
 ### A.4.3 Exposure Detection
 
-An implementation integrating ZEB with BIP-360 **MUST** monitor public mempools for the transaction identifier during the unconfirmed period.
+An implementation integrating ZEB with BIP-360 MUST monitor public mempools for the transaction identifier during the unconfirmed period.
 
-If the transaction appears in any public mempool prior to confirmation, this **MUST** be treated as a ZEB exposure event.
+If non-public submission was selected for an attempt, unintended public appearance prior to confirmation MAY be treated as an exposure condition according to Section 9.
 
----
+If public broadcast was intentionally selected, public appearance is expected and MUST NOT be treated as an exposure condition.
 
 ### A.4.4 Fail-Closed Semantics
 
-Upon a ZEB exposure event, the BIP-360 execution **MUST**:
+Upon an exposure condition or timeout, the BIP-360 execution MUST:
 
 * Abort the active execution attempt.
 * Treat the attempt as compromised.
 * Invalidate any attempt-specific ephemeral material.
 * Transition to a predeclared BIP-360 fallback or recovery path.
 
-The implementation **MUST NOT** retry the same transaction publicly.
+The implementation MUST NOT retry the same transaction publicly using the same attempt material.
 
 ---
 
@@ -526,9 +558,12 @@ All ZEB-constrained BIP-360 P2TSH transactions remain standard and consensus-val
 
 ## A.8 Security Considerations
 
-### A.8.1 Public-Mempool Quantum Reaction Attacks
+### A.8.1 Public-Mempool Reaction Attacks
 
-When integrated with BIP-360 P2TSH execution paths that reveal attack-critical material only at spend time, ZEB prevents pre-confirmation public disclosure and collapses the public-mempool reaction window to approximately zero.
+When integrated with BIP-360 P2TSH execution paths that use an execution-gated spend construction, ZEB denies pre-construction of valid competing spends by requiring execution-time material that is not available prior to execution.
+
+Optional relay discipline (including non-public submission) MAY be used to compress the remaining exposure window and reduce metadata leakage, but ZEB does not require restricted dissemination for correctness when the spend construction is execution-gated.
+
 
 ### A.8.2 Limitations
 
@@ -601,62 +636,56 @@ ZEB is orthogonal to PQHD’s trust, quorum, and recovery models. It constrains 
 
 ### B.4.1 ZEB-Constrained PQHD Execution
 
-When a PQHD execution attempt is authorised, the implementation **MAY** mark the attempt as ZEB-constrained.
+When a PQHD execution attempt is authorised, the implementation MAY mark the attempt as ZEB-constrained.
 
 A ZEB-constrained PQHD execution:
 
-* **MUST** be submitted via non-public submission channels.
-* **MUST NOT** be publicly rebroadcast prior to confirmation.
-* **MUST** be monitored for public-mempool exposure.
-* **MUST** obey PQHD’s attempt-scoped, single-use semantics.
+* MUST use an execution-gated spend construction as defined in Section 3A (i.e., competing spends remain invalid without execution-time material).
+* MAY be submitted via public broadcast or via non-public submission channels.
+* MUST be monitored for deployment-defined exposure conditions during the unconfirmed period.
+* MUST obey PQHD’s attempt-scoped, single-use semantics.
 
 This designation does not modify the underlying transaction, script, or witness structure.
-
----
 
 ### B.4.2 Interaction with PQHD Consent and Epoch Semantics
 
 ZEB integrates directly with PQHD’s existing controls:
 
-* Consent objects **MUST** remain one-shot and attempt-scoped.
-* Epoch freshness **MUST** bound the authorisation window.
-* Ledger monotonicity **MUST** ensure that once an attempt enters ZEB execution, it cannot be replayed or reused.
+* Consent objects MUST remain one-shot and attempt-scoped.
+* Epoch freshness MUST bound the authorisation window.
+* Ledger monotonicity MUST ensure that once an attempt enters ZEB execution, it cannot be replayed or reused.
 
-ZEB does not introduce additional cryptographic checks. It enforces a stricter execution-visibility policy during the authorised window.
+ZEB does not introduce additional cryptographic checks. It applies an execution-visibility policy during the authorised window and relies on the execution-gated spend construction to deny pre-construction.
 
----
+### B.4.3 Submission
 
-### B.4.3 Non-Public Submission
+For a ZEB-constrained PQHD execution, the transaction MAY be delivered using one or more submission routes, including:
 
-For ZEB-constrained PQHD execution, the transaction **SHOULD** be delivered using one or more non-public routes, including:
-
+* Public peer-to-peer broadcast.
 * Limited-relay peers.
-* Miner-connected peers.
+* Miner-connected peers or pool submission endpoints.
 * Transaction accelerator or pool submission endpoints.
 
-ZEB does not require identifying miners or trusting miner behaviour. Any route that avoids public mempool relay is acceptable.
-
----
+Non-public submission MAY be used as an optional optimization to compress the exposure window, but is not required for correctness when the spend construction is execution-gated.
 
 ### B.4.4 Exposure Detection
 
-A PQHD implementation integrating ZEB **MUST**:
+A PQHD implementation integrating ZEB MUST monitor public mempools for the transaction identifier during the unconfirmed period.
 
-* Monitor public mempools for the transaction identifier during the unconfirmed period.
-* Treat any appearance of the transaction in a public mempool prior to confirmation as a ZEB exposure event.
+If non-public submission was selected for an attempt, unintended public appearance prior to confirmation MAY be treated as an exposure condition according to Section 9.
 
----
+If public broadcast was intentionally selected, public appearance is expected and MUST NOT be treated as an exposure condition.
 
 ### B.4.5 Fail-Closed Semantics
 
-Upon a ZEB exposure event, the PQHD execution **MUST**:
+Upon an exposure condition, the PQHD execution MUST:
 
 * Abort the active execution attempt.
 * Mark the attempt as compromised.
-* Invalidate all attempt-specific ephemeral material, including spend-time secrets and consent tokens.
+* Invalidate all attempt-specific ephemeral material, including execution-time material and consent tokens.
 * Transition to a PQHD-defined fallback or recovery path.
 
-The implementation **MUST NOT** retry the same transaction publicly.
+The implementation MUST NOT retry the same transaction publicly using the same attempt material.
 
 ---
 
@@ -700,11 +729,12 @@ All ZEB-constrained PQHD transactions remain standard and consensus-valid.
 
 ## B.8 Security Considerations
 
-### B.8.1 Public-Mempool Quantum Reaction Attacks
+### B.8.1 Public-Mempool Reaction Attacks
 
-When integrated with PQHD execution paths that reveal attack-critical material only at spend time, ZEB prevents pre-confirmation public disclosure and collapses the public-mempool reaction window to approximately zero.
+When integrated with PQHD execution paths that use an execution-gated spend construction, ZEB denies pre-construction of valid competing spends by requiring execution-time material that is not available prior to execution.
 
-This preserves PQHD’s one-shot authority guarantees against adversaries whose attack feasibility depends on execution-time disclosure.
+Optional relay discipline (including non-public submission) MAY be used to compress the remaining exposure window and reduce metadata leakage, but ZEB does not require restricted dissemination for correctness when the spend construction is execution-gated.
+
 
 ### B.8.2 Limitations
 
