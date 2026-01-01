@@ -31,6 +31,17 @@ ZEB requires no consensus changes, introduces no new opcodes, and does not rely 
 
 ZEB does not claim protection against attackers who have already compromised the relevant keys prior to the spend attempt, attackers with access to execution-time material, or adversaries with miner-equivalent connectivity, collusion, or censorship capability.
 
+## ZEB vs Traditional Transaction Broadcast
+
+| Property | Traditional Bitcoin | ZEB |
+|---|---|---|
+| Security basis | Consensus rules only | Execution-gated validity |
+| Public broadcast safe against adversarial replacement? | No (RBF exploitable) | Yes (replacement invalid without execution-time material) |
+| Requires private channels? | No | No |
+| What enables adversarial replacement? | Policy + valid construction | Missing execution-time material |
+| Visibility implies capability? | Often | No (under execution-gated constructions) |
+| Safe against quantum mempool reaction attacks? | No | Yes (with execution-gated construction) |
+
 ---
 
 ## 1. Problem Statement
@@ -39,7 +50,7 @@ Bitcoin’s public mempool is observable. Any transaction relayed publicly expos
 
 Replacement behaviour is governed by mempool policy rather than consensus. Miners MAY include any consensus-valid conflicting transaction they receive. Under a public-mempool adversary model, the critical enabling factor for replacement is pre-confirmation public disclosure.
 
-ZEB removes this enabling factor by requiring an execution-gated spend construction in which competing spends remain invalid until execution-time material is revealed, regardless of transaction visibility.
+ZEB removes this enabling factor by requiring an execution-gated spend construction that makes competing spends invalid until execution-time material is revealed, regardless of public visibility.
 
 ---
 
@@ -753,9 +764,34 @@ These limitations are consistent with PQHD’s stated threat boundaries.
 
 This annex defines the integration of Zero-Exposure Broadcast with PQHD execution flows.
 
-ZEB adds no new trust assumptions, opcodes, or consensus rules. It strengthens PQHD’s post-quantum execution safety by ensuring that PQHD-authorised spends are not exposed to the public mempool prior to confirmation, thereby mitigating public-mempool quantum reaction attacks within PQHD’s existing authority and recovery framework.
+ZEB adds no new trust assumptions, opcodes, or consensus rules. When used with an execution-gated spend construction (as defined in Section 3A), ZEB denies pre-construction of valid competing spends by requiring execution-time material that is not available prior to execution.
+
+When used with non-execution-gated spend constructions, ZEB does not claim replacement resistance and SHOULD be treated as relay-only mitigation that may reduce exposure but does not change validity properties.
+
+Optional relay discipline (including non-public submission) MAY be used in either case to compress the remaining exposure window and reduce metadata leakage.
 
 ---
+
+# Appendix C — Common Misinterpretations
+
+This appendix addresses frequent misunderstandings about Zero-Exposure Broadcast (ZEB) and distinguishes core security properties from deployment options.
+
+## C.1 “ZEB is a private relay protocol”
+
+Incorrect. ZEB’s core security property derives from execution-gated validity: competing spends remain invalid until execution-time material is revealed. Non-public submission is an optional deployment optimization, not the security mechanism.
+
+## C.2 “Public broadcast breaks ZEB security”
+
+Incorrect. ZEB remains secure under public broadcast when the selected spend construction is execution-gated, because transaction visibility does not enable construction of valid competing spends.
+
+## C.3 “Exposure detection indicates a security failure”
+
+Incorrect. Exposure detection enforces fail-closed semantics for execution attempts that selected non-public submission. It does not indicate a weakness in execution-gated validity.
+
+## C.4 “ZEB requires miner cooperation”
+
+Incorrect. ZEB requires no miner coordination, trust, or special behavior. It works entirely within standard Bitcoin Script and consensus semantics.
+
 
 # **ACKNOWLEDGEMENTS (INFORMATIVE)**
 
@@ -769,13 +805,12 @@ The author acknowledges the foundational contributions of the following individu
 * **Pieter Wuille** — for SegWit, Taproot, Miniscript, PSBT semantics, and deep contributions to Bitcoin’s transaction and script architecture.
 * **Greg Maxwell** — for extensive work on Bitcoin security, adversarial analysis, transaction malleability, and mempool and relay dynamics.
 * **Andrew Poelstra** — for Miniscript, script composability, and formal reasoning about Bitcoin spending policies.
-* **Ethan Heilman** — for research on transaction relay, network-layer adversaries, and attack models relevant to mempool-visible behaviour.
-* **Hunter Beast** — for contributions to Bitcoin protocol design discussions and work relevant to script-path execution and operational security.
-* **Isabel Foxen Duke** — for sustained work on Bitcoin wallet architecture, operational security, and user-facing custody models.
+* **Ethan Heilman**, **Hunter Beast**, and **Isabel Foxen Duke** — for their combined work on the BIP-360 specification.
 * **Peter Shor** — for demonstrating the impact of quantum computation on widely deployed cryptographic schemes.
 * **Daniel J. Bernstein** — for cryptographic engineering discipline and post-quantum cryptographic research.
 * **The Bitcoin Core developer community** — for the ongoing design, implementation, and review of Bitcoin’s networking, mempool, and transaction-relay behaviour.
-* **Authors and contributors to Bitcoin Improvement Proposals (including BIP-360)** — for formalising interfaces, threat models, and deployment constraints relevant to script-path-only execution and transaction propagation.
+* **Authors and contributors to Bitcoin Improvement Proposals** — for formalising interfaces, threat models, and deployment constraints relevant to script-path-only execution and transaction propagation.
+
 * **The NIST Post-Quantum Cryptography Project** — for the standardisation and evaluation of post-quantum cryptographic primitives.
 
 Acknowledgement is also due to independent researchers, node operators, miners, and reviewers who have examined mempool behaviour, transaction propagation, and adversarial reaction dynamics, and whose work has informed the operational assumptions underlying this specification.
