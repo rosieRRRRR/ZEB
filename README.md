@@ -561,7 +561,8 @@ No new opcodes. No consensus changes.
 
 ## B.1 Purpose
 
-This annex specifies how Zero-Exposure Broadcast (ZEB) integrates with **PQHD (Post-Quantum Hierarchical Deterministic custody and execution models)** to mitigate public-mempool quantum reaction attacks while preserving PQHD’s existing authority, consent, and recovery semantics.
+This annex specifies how Zero-Exposure Broadcast (ZEB) integrates with PQHD (Post-Quantum Hierarchical Deterministic custody and execution models) - https://github.com/rosieRRRRR/PQHD
+ - to mitigate public-mempool quantum reaction attacks while preserving PQHD’s existing authority, consent, and recovery semantics.
 
 ZEB is an execution-visibility constraint layered on top of PQHD. It does not modify PQHD’s cryptographic predicates, custody tiers, or key-management guarantees. It constrains how and when a PQHD-authorised transaction is disclosed to the network.
 
