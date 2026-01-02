@@ -34,11 +34,11 @@ ZEB does not claim protection against attackers who have already compromised the
 ## ZEB vs Traditional Transaction Broadcast
 
 | Property | Traditional Bitcoin | ZEB |
-|---|---|---|
-| Security basis | Consensus rules only | Execution-gated validity |
-| Public broadcast safe against adversarial replacement? | No (RBF exploitable) | Yes (replacement invalid without execution-time material) |
+|----------|--------------------|-----|
+| Security basis | Consensus + mempool policy | Execution-gated validity |
+| Public broadcast safe against adversarial replacement? | No (RBF exploitable) | Yes (with execution-gated construction) |
 | Requires private channels? | No | No |
-| What enables adversarial replacement? | Policy + valid construction | Missing execution-time material |
+| What enables adversarial replacement? | Valid competing construction | Missing execution-time material |
 | Visibility implies capability? | Often | No (under execution-gated constructions) |
 | Safe against quantum mempool reaction attacks? | No | Yes (with execution-gated construction) |
 
@@ -48,9 +48,10 @@ ZEB does not claim protection against attackers who have already compromised the
 
 Bitcoin’s public mempool is observable. Any transaction relayed publicly exposes its witness and, in many constructions, reveals attack-critical material required to authorise spending. Reactive adversaries can monitor the public mempool and attempt to construct conflicting spends before confirmation.
 
-Replacement behaviour is governed by mempool policy rather than consensus. Miners MAY include any consensus-valid conflicting transaction they receive. Under a public-mempool adversary model, the critical enabling factor for replacement is pre-confirmation public disclosure.
+Replacement behaviour is governed by mempool policy rather than consensus. Miners MAY include any consensus-valid conflicting transaction they receive. Under a public-mempool adversary model, replacement is enabled only when a valid competing spend can be constructed during the broadcast-to-confirmation window.
 
-ZEB removes this enabling factor by requiring an execution-gated spend construction that makes competing spends invalid until execution-time material is revealed, regardless of public visibility.
+ZEB removes this enabling condition by requiring an execution-gated spend construction that makes competing spends invalid until execution-time material is revealed, regardless of public visibility.
+
 
 ---
 
@@ -772,26 +773,126 @@ Optional relay discipline (including non-public submission) MAY be used in eithe
 
 ---
 
-# Appendix C — Common Misinterpretations
+# Annex C — Common Misinterpretations (Informative)
 
-This appendix addresses frequent misunderstandings about Zero-Exposure Broadcast (ZEB) and distinguishes core security properties from deployment options.
+This annex addresses frequent misunderstandings about Zero-Exposure Broadcast (ZEB) and explicitly distinguishes its core security properties from optional deployment choices. It is provided to prevent incorrect mental models when reading or implementing this specification.
 
 ## C.1 “ZEB is a private relay protocol”
 
-Incorrect. ZEB’s core security property derives from execution-gated validity: competing spends remain invalid until execution-time material is revealed. Non-public submission is an optional deployment optimization, not the security mechanism.
+Incorrect. ZEB’s core security property derives from execution-gated validity: competing spends remain invalid until execution-time material is revealed. Private or non-public submission is an optional deployment optimization that may reduce residual exposure and metadata leakage, but it is not the security mechanism.
 
 ## C.2 “Public broadcast breaks ZEB security”
 
-Incorrect. ZEB remains secure under public broadcast when the selected spend construction is execution-gated, because transaction visibility does not enable construction of valid competing spends.
+Incorrect. ZEB remains secure under public broadcast when used with an execution-gated spend construction. Transaction visibility does not enable construction of valid competing spends because the information required to construct such spends is unavailable prior to execution-time material revelation.
 
 ## C.3 “Exposure detection indicates a security failure”
 
-Incorrect. Exposure detection enforces fail-closed semantics for execution attempts that selected non-public submission. It does not indicate a weakness in execution-gated validity.
+Incorrect. Exposure detection enforces fail-closed semantics for execution attempts that selected non-public submission. It does not indicate a weakness in execution-gated validity or a failure of ZEB’s core security model.
 
 ## C.4 “ZEB requires miner cooperation”
 
-Incorrect. ZEB requires no miner coordination, trust, or special behavior. It works entirely within standard Bitcoin Script and consensus semantics.
+Incorrect. ZEB requires no miner coordination, trust, or special behavior. It operates entirely within standard Bitcoin validation rules and consensus semantics. Miner-colluding adversaries are explicitly out of scope for this specification.
 
+## C.5 “ZEB requires new opcodes or consensus changes”
+
+Incorrect. ZEB works with existing Bitcoin Script and transaction rules. No new opcodes, soft forks, or hard forks are required.
+
+## C.6 “ZEB eliminates all transaction races”
+
+Incorrect. ZEB eliminates pre-construction and reactive replacement attacks prior to execution-time material revelation. It does not eliminate the final confirmation race, which is a fundamental property of Bitcoin under current consensus rules.
+
+---
+
+# Annex D — Illustrative Execution-Gated Spend Constructions (Informative)
+
+## D.1 Purpose and Scope
+
+This annex provides illustrative examples of spend constructions that may satisfy the execution-gated property defined in Section 3A using current Bitcoin Script capabilities. These examples are non-normative and are provided solely to demonstrate feasibility and design patterns.
+
+ZEB does not mandate any specific execution-gated construction. Wallets and applications are responsible for selecting constructions appropriate to their threat model, operational constraints, and cryptographic assumptions.
+
+---
+
+## D.2 Execution-Gated Property Recap
+
+An execution-gated spend construction ensures that a valid competing spend cannot be constructed without execution-time material that is intentionally withheld until the execution attempt.
+
+This property denies pre-construction of competing transactions. It does not eliminate all races, but it removes the attacker’s ability to prepare a valid replacement in advance.
+
+---
+
+## D.3 Illustrative Pattern: Hash-Preimage-Gated Script Path
+
+### Conceptual Script Pattern (Illustrative)
+
+```
+OP_HASH256 <H(secret)> OP_EQUALVERIFY <pubkey> OP_CHECKSIG
+```
+
+### Properties
+
+- The commitment `<H(secret)>` is visible at output creation.
+- The preimage `secret` is not revealed until execution.
+- A valid spend cannot be constructed without knowledge of `secret`.
+- Observing the public mempool does not enable pre-construction of a valid competing spend.
+
+### Limitations
+
+- A race window exists after execution-time material is revealed and before confirmation.
+- Miner-colluding or miner-connected adversaries remain out of scope.
+- Security depends on the entropy, handling, and lifecycle management of `secret`.
+
+This pattern is illustrative only and does not claim optimality or sufficiency for all threat models.
+
+---
+
+### D.3.1 Quantum Threat Consideration (Informative)
+
+This pattern is intended to illustrate execution-gated validity (denial of pre-construction). It does not, by itself, eliminate the post-revelation confirmation race. In threat models where an adversary can derive signing keys from observed signatures within the broadcast-to-confirmation window, revealing the preimage in the witness may be insufficient to prevent a competing spend during that residual race window.
+
+Implementations targeting post-quantum mempool reaction attacks SHOULD combine execution-gated constructions with operational measures that compress the residual window (for example, bounded confirmation targets and optional non-public submission) and SHOULD avoid constructions that reveal long-lived signing material in ways that meaningfully advantage a quantum-capable adversary.
+
+---
+
+## D.4 Alternative Pattern: Adaptor-Signature-Gated Execution (Conceptual)
+
+Adaptor signature techniques may be used to gate completion of a valid signature on revelation of auxiliary execution-time material.
+
+Conceptually:
+- Partial signature material is insufficient to construct a valid spend.
+- Completion requires execution-time material revealed only at execution.
+- Pre-construction of a valid competing spend is denied.
+
+Concrete adaptor constructions depend on wallet support and cryptographic tooling and are outside the scope of this specification.
+
+---
+
+## D.5 Residual Race Window
+
+Execution-gated constructions deny pre-construction but do not eliminate the confirmation race once execution-time material is revealed.
+
+ZEB addresses this residual exposure through:
+- Optional non-public submission to compress exposure time.
+- Exposure detection and fail-closed semantics.
+- Bounded confirmation windows.
+
+This residual race is an acknowledged limitation, not a flaw.
+
+---
+
+## D.6 Relationship to Non-Public Submission
+
+Non-public submission is an optional optimization. When execution-gated validity holds, ZEB remains correct under public broadcast. Non-public submission may reduce residual race exposure and metadata leakage but is not required for correctness.
+
+---
+
+## D.7 Summary
+
+This annex demonstrates that execution-gated spend constructions are feasible using current Bitcoin Script and cryptographic techniques.
+
+ZEB defines a broadcast and execution discipline that operates correctly if and only if the selected spend construction satisfies the execution-gated property defined in Section 3A. The absence of a mandated construction is intentional and preserves flexibility, safety, and future compatibility.
+
+---
 
 # **ACKNOWLEDGEMENTS (INFORMATIVE)**
 
