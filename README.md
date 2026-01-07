@@ -3,7 +3,7 @@
 **An Open Standard for Execution-Gated Transactions, with a Bitcoin Broadcast Profile**
 
 * **Specification Version:** 1.2.0
-* **Status:** Implementation Ready
+* **Status:** Public beta
 * **Date:** 2026
 * **Author:** rosiea
 * **Contact:** PQRosie@proton.me
